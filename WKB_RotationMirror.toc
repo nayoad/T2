@@ -2,7 +2,7 @@
 ## Title: Wakaba Rotation Mirror
 ## Notes: Use /wrm to open settings.
 ## Author: Nyarutan [cite: 2]
-## Version: 2.0 [cite: 2]
+## Version: 2.1
 ## X-Credits: LibStub, CallbackHandler, LibDataBroker, LibDBIcon
 ## SavedVariables: WKB_RotationMirrorMinimapDB
 ## SavedVariablesPerCharacter: WKB_RotationMirrorDB

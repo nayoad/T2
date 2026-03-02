@@ -1,5 +1,6 @@
 -- Wakaba Rotation Mirror (Retail 12.1 Midnight)
--- BlizzardのAssisted Combat「次のキャスト」の推奨を1つのアイコンとしてミラーリングします。
+-- SPELL_ACTIVATION_OVERLAY_GLOW_SHOW イベントを使用してスペルグローをミラーリングします。
+-- C_AssistedCombat は不使用 (penalty なし)。
 -- ミニマル: プロック/バフ/スタックの追跡なし。
 --
 -- 機能:
@@ -1183,7 +1184,7 @@ local borderBlinkNextTime = 0   -- 次にインデックスを進める時刻
 
 local WRM_DEBUG_GLOW = false  -- set to true to debug glow hook events
 local currentGlowedSlot = nil   -- the currently highlighted action slot
-local currentGlowedButton = nil -- the currently highlighted ActionButton
+local currentGlowedSpellID = nil -- the spellID of the currently glowed spell
 
 local function GoInactive()
   currentSlot, currentButton = nil, nil
@@ -1223,13 +1224,11 @@ local function UpdateMirrorFromGlow()
   local key = GetHotkeyTextForSlot(slot)
   local btn = FindActionButtonForSlot(slot)
 
-  -- Nur updaten wenn sich etwas geändert hat
-  if slot ~= lastSlot or tex ~= lastTex or key ~= lastKey then
+  if currentGlowedSpellID ~= lastSpellID or slot ~= lastSlot or tex ~= lastTex or key ~= lastKey then
     RM.Icon:SetTexture(tex)
     RM.Icon:SetDesaturated(false)
     RM.Hotkey:SetText(key or "")
-    lastSlot, lastTex, lastKey = slot, tex, key
-    lastSpellID = nil  -- kein C_AssistedCombat mehr nötig
+    lastSpellID, lastSlot, lastTex, lastKey = currentGlowedSpellID, slot, tex, key
   end
 
   currentSlot = slot
@@ -1334,45 +1333,6 @@ local function UpdateMirrorFromGlow()
   end
 
   SetActive(true)
-end
-
--- =========================
--- Glow Hook (penalty-free): ActionButtonSpellAlertManager
--- IMPORTANT: hooksecurefunc instead of direct override → no taint
--- =========================
-if ActionButtonSpellAlertManager then
-  hooksecurefunc(ActionButtonSpellAlertManager, "ShowAlert", function(manager, actionButton)
-    if not actionButton or not actionButton.action then return end
-    local slot = actionButton.action
-    if type(slot) ~= "number" or slot < 1 then return end
-    if WRM_DEBUG_GLOW then
-      print(string.format("[WRM Glow] ShowAlert: slot=%s, btn=%s",
-        tostring(slot),
-        tostring(actionButton and actionButton:GetName() or "nil")))
-    end
-    currentGlowedSlot = slot
-    currentGlowedButton = actionButton
-    QueueMirrorUpdate("mirror")
-  end)
-
-  hooksecurefunc(ActionButtonSpellAlertManager, "HideAlert", function(manager, actionButton)
-    if not actionButton then return end
-    if actionButton == currentGlowedButton then
-      currentGlowedSlot = nil
-      currentGlowedButton = nil
-      QueueMirrorUpdate("mirror")
-    end
-  end)
-else
-  -- Fallback: EventRegistry callbacks (Midnight 12.x)
-  if EventRegistry then
-    EventRegistry:RegisterCallback("AssistedCombatManager.OnAssistedHighlightSpellChange", function()
-      QueueMirrorUpdate("mirror")
-    end, RM)
-    EventRegistry:RegisterCallback("AssistedCombatManager.RotationSpellsUpdated", function()
-      QueueMirrorUpdate("mirror")
-    end, RM)
-  end
 end
 
 -- =========================
@@ -1684,8 +1644,33 @@ RM:RegisterEvent("PLAYER_REGEN_ENABLED")
 RM:RegisterUnitEvent("UNIT_INVENTORY_CHANGED", "player")
 RM:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 RM:RegisterEvent("BAG_UPDATE")
+RM:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
+RM:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
 
 RM:SetScript("OnEvent", function(_, event, ...)
+  if event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" then
+    local spellID = ...
+    if spellID then
+      local slot = FindSlotForSpellOrMacro(spellID)
+      if slot then
+        currentGlowedSlot = slot
+        currentGlowedSpellID = spellID
+        QueueMirrorUpdate("mirror")
+      end
+    end
+    return
+  end
+
+  if event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
+    local spellID = ...
+    if spellID and spellID == currentGlowedSpellID then
+      currentGlowedSlot = nil
+      currentGlowedSpellID = nil
+      QueueMirrorUpdate("mirror")
+    end
+    return
+  end
+
   if event == "PLAYER_REGEN_DISABLED" then
     inCombat = true
     UpdateBorderColor()
