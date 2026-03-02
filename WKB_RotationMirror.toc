@@ -1,0 +1,17 @@
+## Interface: 120001
+## Title: Wakaba Rotation Mirror
+## Notes: Use /wrm to open settings.
+## Author: Nyarutan [cite: 2]
+## Version: 2.0 [cite: 2]
+## X-Credits: LibStub, CallbackHandler, LibDataBroker, LibDBIcon
+## SavedVariables: WKB_RotationMirrorMinimapDB
+## SavedVariablesPerCharacter: WKB_RotationMirrorDB
+## IconTexture: Interface\AddOns\WKB_RotationMirror\media\icon.tga
+## AddonCompartmentFunc: WKB_RotationMirror_OnCompartmentClick
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+
+WKB_RotationMirror.lua
