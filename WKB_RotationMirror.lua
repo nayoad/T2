@@ -1181,6 +1181,10 @@ local lastInRange = nil  -- true/false/nil; only main icon uses out-of-range tin
 local borderBlinkIndex = 1      -- 1..5 (シアン→紫→赤→紫→シアン)
 local borderBlinkNextTime = 0   -- 次にインデックスを進める時刻
 
+local WRM_DEBUG_GLOW = false  -- set to true to debug glow hook events
+local currentGlowedSlot = nil   -- the currently highlighted action slot
+local currentGlowedButton = nil -- the currently highlighted ActionButton
+
 local function GoInactive()
   currentSlot, currentButton = nil, nil
   SetPressed(false)
@@ -1203,21 +1207,8 @@ local function GoInactive()
   end
 end
 
-local function UpdateMirror()
-  -- If API isn't present or feature is off/unavailable, just go inactive (don't hide frame)
-  if not (C_AssistedCombat and C_AssistedCombat.GetNextCastSpell) then
-    GoInactive()
-    return
-  end
-
-  -- true: prefer visible button recommendation
-  local spellID = C_AssistedCombat.GetNextCastSpell(true)
-  if not spellID then
-    GoInactive()
-    return
-  end
-
-  local slot = FindSlotForSpellOrMacro(spellID)
+local function UpdateMirrorFromGlow()
+  local slot = currentGlowedSlot
   if not slot then
     GoInactive()
     return
@@ -1230,13 +1221,15 @@ local function UpdateMirror()
   end
 
   local key = GetHotkeyTextForSlot(slot)
-  local btn = FindActionButtonForSlot(slot) -- may be nil if not visible; that's OK
+  local btn = FindActionButtonForSlot(slot)
 
-  if spellID ~= lastSpellID or slot ~= lastSlot or tex ~= lastTex or key ~= lastKey then
+  -- Nur updaten wenn sich etwas geändert hat
+  if slot ~= lastSlot or tex ~= lastTex or key ~= lastKey then
     RM.Icon:SetTexture(tex)
     RM.Icon:SetDesaturated(false)
     RM.Hotkey:SetText(key or "")
-    lastSpellID, lastSlot, lastTex, lastKey = spellID, slot, tex, key
+    lastSlot, lastTex, lastKey = slot, tex, key
+    lastSpellID = nil  -- kein C_AssistedCombat mehr nötig
   end
 
   currentSlot = slot
@@ -1341,6 +1334,45 @@ local function UpdateMirror()
   end
 
   SetActive(true)
+end
+
+-- =========================
+-- Glow Hook (penalty-free): ActionButtonSpellAlertManager
+-- IMPORTANT: hooksecurefunc instead of direct override → no taint
+-- =========================
+if ActionButtonSpellAlertManager then
+  hooksecurefunc(ActionButtonSpellAlertManager, "ShowAlert", function(manager, actionButton)
+    if not actionButton or not actionButton.action then return end
+    local slot = actionButton.action
+    if type(slot) ~= "number" or slot < 1 then return end
+    if WRM_DEBUG_GLOW then
+      print(string.format("[WRM Glow] ShowAlert: slot=%s, btn=%s",
+        tostring(slot),
+        tostring(actionButton and actionButton:GetName() or "nil")))
+    end
+    currentGlowedSlot = slot
+    currentGlowedButton = actionButton
+    QueueMirrorUpdate("mirror")
+  end)
+
+  hooksecurefunc(ActionButtonSpellAlertManager, "HideAlert", function(manager, actionButton)
+    if not actionButton then return end
+    if actionButton == currentGlowedButton then
+      currentGlowedSlot = nil
+      currentGlowedButton = nil
+      QueueMirrorUpdate("mirror")
+    end
+  end)
+else
+  -- Fallback: EventRegistry callbacks (Midnight 12.x)
+  if EventRegistry then
+    EventRegistry:RegisterCallback("AssistedCombatManager.OnAssistedHighlightSpellChange", function()
+      QueueMirrorUpdate("mirror")
+    end, RM)
+    EventRegistry:RegisterCallback("AssistedCombatManager.RotationSpellsUpdated", function()
+      QueueMirrorUpdate("mirror")
+    end, RM)
+  end
 end
 
 -- =========================
@@ -1592,7 +1624,7 @@ local function ProcessUpdateQueue()
   for _ = 1, n do
     local what = table.remove(updateQueue, 1)
     if what == "mirror" then
-      UpdateMirror()
+      UpdateMirrorFromGlow()
     elseif what == "trinket1" then
       UpdateTrinketSlotOne(1)
     elseif what == "trinket2" then
@@ -1619,16 +1651,20 @@ function QueueMirrorUpdate(what)
 end
 
 -- =========================
--- Ticker: mirror only every 0.2s; Trinkets/FreeSlots are event-driven via queue
+-- Range ticker: refresh range/border-color only (no C_AssistedCombat call)
 -- =========================
-local TICKER_INTERVAL = 0.2
-local function StartTicker()
-  if RM._ticker then
-    RM._ticker:Cancel()
-    RM._ticker = nil
+local RANGE_TICKER_INTERVAL = 0.25
+local function StartRangeTicker()
+  if RM._rangeTicker then
+    RM._rangeTicker:Cancel()
+    RM._rangeTicker = nil
   end
-  RM._ticker = C_Timer.NewTicker(TICKER_INTERVAL, function()
-    UpdateMirror()
+  RM._rangeTicker = C_Timer.NewTicker(RANGE_TICKER_INTERVAL, function()
+    -- Only update range and border color when a slot is already active
+    -- NO C_AssistedCombat call!
+    if currentGlowedSlot then
+      UpdateMirrorFromGlow()
+    end
   end)
 end
 
@@ -1670,8 +1706,7 @@ RM:SetScript("OnEvent", function(_, event, ...)
     RestorePosition()
     SetIconSizePx(WKB_RotationMirrorDB.iconSize or DB_DEFAULTS.iconSize)
     SetActive(false)
-    StartTicker()
-    UpdateMirror()
+    StartRangeTicker()
     UpdateTrinkets()
     UpdateFreeSlots()
 
@@ -1736,7 +1771,7 @@ RM:SetScript("OnEvent", function(_, event, ...)
   end
 
   if event == "ACTIONBAR_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_COOLDOWN" then
-    UpdateMirror()
+    QueueMirrorUpdate("mirror")
     return
   end
 end)
